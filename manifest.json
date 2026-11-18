@@ -1,0 +1,9 @@
+{
+  "name": "Car Dash",
+  "short_name": "Car Dash",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "orientation": "any"
+}

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="hy">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d10">
+  <title>Car Dash</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Car Dash</div>
+    <div class="clock" id="clock">--:--</div>
+    <div class="net" id="net">●</div>
+  </header>
+
+  <main class="layout">
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="map-buttons">
+        <button class="btn" id="btn-center" title="Կենտրոնացնել">◎</button>
+        <button class="btn" id="btn-follow" title="Հետևել">Հետևել</button>
+        <button class="btn" id="btn-layer" title="Քարտեզի տեսակ">Արբանյակ</button>
+      </div>
+      <div class="map-status" id="map-status">Որոնում եմ տեղը…</div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <div class="card-title">Արագություն</div>
+        <div class="big" id="speed">—</div>
+        <div class="unit">կմ/ժ</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Կոորդինատներ</div>
+        <div class="mono" id="coords">—</div>
+        <div class="small" id="accuracy"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Մեքենա</div>
+        <div class="row"><span>Լիցք</span><b id="battery">—</b></div>
+        <div class="row"><span>Մնացած կմ</span><b id="range">—</b></div>
+        <div class="row"><span>Կողպված</span><b id="locked">—</b></div>
+        <div class="row"><span>Ներսում</span><b id="inside-temp">—</b></div>
+        <button class="btn wide" id="btn-tesla" disabled>Login with Tesla (շուտով)</button>
+        <div class="small">Մեքենայի տվյալները կգան Tesla Fleet API-ով, developer app-ը գրանցելուց հետո։</div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
