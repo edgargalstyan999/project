@@ -83,6 +83,7 @@
     $('coords').textContent = latitude.toFixed(5) + ', ' + longitude.toFixed(5);
     $('accuracy').textContent = 'Ճշտություն՝ ±' + Math.round(accuracy) + ' մ';
     $('speed').textContent = speed == null || isNaN(speed) ? '0' : Math.round(speed * 3.6);
+    updateNearest();
     $('map-status').textContent = 'Թարմացվել ա ' + new Date().toLocaleTimeString('hy-AM', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   }
 
@@ -104,6 +105,89 @@
   } else {
     $('map-status').textContent = 'Այս browser-ը տեղորոշում չի աջակցում';
   }
+
+  // ---- Charging stations (from stations.json) ----
+  const NETWORK_COLORS = {
+    evan: '#34c759',
+    'team energy': '#ff9f0a',
+    'eva charging': '#bf5af2',
+    ecocars: '#64d2ff',
+  };
+  const stationLayer = L.layerGroup().addTo(map);
+  let stations = [];
+  let stationsOn = true;
+
+  function networkColor(network) {
+    return NETWORK_COLORS[String(network || '').trim().toLowerCase()] || '#ffd60a';
+  }
+
+  function escapeHtml(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function stationPopup(s) {
+    const rows = [
+      '<b>' + escapeHtml(s.name || s.network || 'Կայան') + '</b>',
+      s.network ? escapeHtml(s.network) : '',
+      s.address ? escapeHtml(s.address) : '',
+      s.power_kw ? escapeHtml(s.power_kw) + ' kW' : '',
+      Array.isArray(s.connectors) && s.connectors.length ? escapeHtml(s.connectors.join(', ')) : '',
+      s.price ? escapeHtml(s.price) : '',
+      s.opened ? 'Բացվել ա՝ ' + escapeHtml(s.opened) : '',
+    ].filter(Boolean);
+    return '<div class="station-popup">' + rows.join('<br>') + '</div>';
+  }
+
+  function renderStations() {
+    stationLayer.clearLayers();
+    stations.forEach((s) => {
+      L.circleMarker([s.lat, s.lng], {
+        radius: 9,
+        color: '#0b0d10',
+        weight: 2,
+        fillColor: networkColor(s.network),
+        fillOpacity: 0.95,
+      }).bindPopup(stationPopup(s)).addTo(stationLayer);
+    });
+    $('station-count').textContent = stations.length ? stations.length + ' կայան' : 'Կայաններ չկան';
+    updateNearest();
+  }
+
+  // Straight-line distance in km.
+  function distanceKm(a, b) {
+    const R = 6371;
+    const dLat = (b[0] - a[0]) * Math.PI / 180;
+    const dLng = (b[1] - a[1]) * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function updateNearest() {
+    if (!lastPos || !stations.length) { $('nearest').textContent = '—'; return; }
+    let best = null;
+    stations.forEach((s) => {
+      const d = distanceKm(lastPos, [s.lat, s.lng]);
+      if (!best || d < best.d) best = { s, d };
+    });
+    const dist = best.d < 1 ? Math.round(best.d * 1000) + ' մ' : best.d.toFixed(1) + ' կմ';
+    $('nearest').textContent = (best.s.name || best.s.network || 'Կայան') + ' · ' + dist;
+  }
+
+  $('btn-stations').addEventListener('click', () => {
+    stationsOn = !stationsOn;
+    $('btn-stations').classList.toggle('on', stationsOn);
+    if (stationsOn) stationLayer.addTo(map); else map.removeLayer(stationLayer);
+  });
+  $('btn-stations').classList.add('on');
+
+  fetch('stations.json', { cache: 'no-cache' })
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then((data) => {
+      const list = Array.isArray(data) ? data : data.stations;
+      stations = (list || []).filter((s) => isFinite(s.lat) && isFinite(s.lng));
+      renderStations();
+    })
+    .catch(() => { $('station-count').textContent = 'stations.json-ը չբացվեց'; });
 
   // ---- Clock and network ----
   function tick() {
