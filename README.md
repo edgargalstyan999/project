@@ -6,7 +6,14 @@ Open `index.html` through any static web server (GitHub Pages works). Geolocatio
 
 ## Charging stations
 
-The map reads `stations.json`. Each station needs `lat` and `lng`; everything else is optional.
+Two sources are shown together:
+
+1. **OpenStreetMap, live.** On start the app asks Overpass for every `amenity=charging_station` in Armenia, trying `overpass-api.de`, then `overpass.kumi.systems`, then `overpass.private.coffee`. The result is cached in the browser for 12 hours, so the car does not download it on every start and still shows stations when offline.
+2. **`stations.json`, our own list** (for example EVAN stations taken from the EVAN app). If an OpenStreetMap station is within 50 m of one of ours, only ours is shown.
+
+The side card shows how many stations came from each source.
+
+The app reads `stations.json` like this. Each station needs `lat` and `lng`; everything else is optional.
 
 ```json
 {

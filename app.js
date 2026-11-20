@@ -106,19 +106,54 @@
     $('map-status').textContent = 'Այս browser-ը տեղորոշում չի աջակցում';
   }
 
-  // ---- Charging stations (from stations.json) ----
-  const NETWORK_COLORS = {
-    evan: '#34c759',
-    'team energy': '#ff9f0a',
-    'eva charging': '#bf5af2',
-    ecocars: '#64d2ff',
+  // ---- Charging stations ----
+  // Two sources: stations.json (our own list, e.g. from EVAN app screenshots)
+  // and every charging station in Armenia from OpenStreetMap, loaded live.
+  const NETWORKS = [
+    { re: /\bevan\b/i, color: '#34c759' },
+    { re: /\bteam\b/i, color: '#ff9f0a' },
+    { re: /\beva\b/i, color: '#bf5af2' },
+    { re: /eco\s*cars/i, color: '#64d2ff' },
+  ];
+  const OTHER_COLOR = '#ffd60a';
+
+  const OVERPASS_SERVERS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+  ];
+  // Armenia plus a small margin.
+  const OSM_QUERY = '[out:json][timeout:60];nwr["amenity"="charging_station"](38.8,43.4,41.35,46.7);out center tags;';
+  const OSM_CACHE_KEY = 'carDash.osmStations.v1';
+  const OSM_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+  const SAME_STATION_KM = 0.05;
+
+  const SOCKETS = {
+    type2: 'Type 2',
+    type2_cable: 'Type 2 (մալուխով)',
+    type2_combo: 'CCS2',
+    type1: 'Type 1',
+    type1_combo: 'CCS1',
+    chademo: 'CHAdeMO',
+    gb_dc: 'GB/T DC',
+    gb_ac: 'GB/T AC',
+    tesla_supercharger: 'Tesla',
+    nacs: 'Tesla (NACS)',
+    schuko: 'Schuko',
   };
+
   const stationLayer = L.layerGroup().addTo(map);
+  let manualStations = [];
+  let osmStations = [];
   let stations = [];
   let stationsOn = true;
+  let manualStatus = 'Բեռնում եմ…';
+  let osmStatus = 'բեռնում եմ…';
 
   function networkColor(network) {
-    return NETWORK_COLORS[String(network || '').trim().toLowerCase()] || '#ffd60a';
+    const n = String(network || '');
+    const hit = NETWORKS.find((x) => x.re.test(n));
+    return hit ? hit.color : OTHER_COLOR;
   }
 
   function escapeHtml(v) {
@@ -128,28 +163,76 @@
   function stationPopup(s) {
     const rows = [
       '<b>' + escapeHtml(s.name || s.network || 'Կայան') + '</b>',
-      s.network ? escapeHtml(s.network) : '',
+      s.network && s.network !== s.name ? escapeHtml(s.network) : '',
       s.address ? escapeHtml(s.address) : '',
       s.power_kw ? escapeHtml(s.power_kw) + ' kW' : '',
       Array.isArray(s.connectors) && s.connectors.length ? escapeHtml(s.connectors.join(', ')) : '',
       s.price ? escapeHtml(s.price) : '',
+      s.hours ? 'Ժամեր՝ ' + escapeHtml(s.hours) : '',
       s.opened ? 'Բացվել ա՝ ' + escapeHtml(s.opened) : '',
+      '<span class="station-src">' + (s.source === 'osm' ? 'OpenStreetMap' : 'Մեր ցուցակ') + '</span>',
     ].filter(Boolean);
     return '<div class="station-popup">' + rows.join('<br>') + '</div>';
+  }
+
+  // Turn one OpenStreetMap element into our station format.
+  function fromOsm(el) {
+    const t = el.tags || {};
+    const lat = el.lat != null ? el.lat : el.center && el.center.lat;
+    const lng = el.lon != null ? el.lon : el.center && el.center.lon;
+    const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
+    const address = [street, t['addr:city']].filter(Boolean).join(', ');
+
+    const connectors = [];
+    let power = 0;
+    Object.keys(t).forEach((k) => {
+      const m = /^socket:([a-z0-9_]+)$/.exec(k);
+      if (m && t[k] !== 'no' && t[k] !== '0') connectors.push(SOCKETS[m[1]] || m[1]);
+      if (/^socket:[a-z0-9_]+:output$/.test(k) || k === 'charging_station:output') {
+        const kw = parseFloat(String(t[k]).replace(',', '.'));
+        if (isFinite(kw)) power = Math.max(power, /\bw\b/i.test(t[k]) && !/kw/i.test(t[k]) ? kw / 1000 : kw);
+      }
+    });
+
+    return {
+      name: t.name || t['name:hy'] || t['name:en'] || '',
+      network: t.network || t.operator || t.brand || '',
+      lat: Number(lat),
+      lng: Number(lng),
+      address,
+      power_kw: power || null,
+      connectors,
+      price: t.fee === 'no' ? 'Անվճար' : t.charge || '',
+      hours: t.opening_hours || '',
+      source: 'osm',
+    };
+  }
+
+  function validStation(s) {
+    return s && isFinite(s.lat) && isFinite(s.lng) && Math.abs(s.lat) <= 90 && Math.abs(s.lng) <= 180;
+  }
+
+  // Our own list wins: drop OSM stations that sit on top of one of ours.
+  function mergeStations() {
+    const extra = osmStations.filter((o) => !manualStations.some((m) => distanceKm([m.lat, m.lng], [o.lat, o.lng]) < SAME_STATION_KM));
+    stations = manualStations.concat(extra);
+    renderStations();
   }
 
   function renderStations() {
     stationLayer.clearLayers();
     stations.forEach((s) => {
       L.circleMarker([s.lat, s.lng], {
-        radius: 9,
+        radius: s.source === 'osm' ? 7 : 9,
         color: '#0b0d10',
         weight: 2,
-        fillColor: networkColor(s.network),
+        fillColor: networkColor(s.network || s.name),
         fillOpacity: 0.95,
       }).bindPopup(stationPopup(s)).addTo(stationLayer);
     });
-    $('station-count').textContent = stations.length ? stations.length + ' կայան' : 'Կայաններ չկան';
+    const evan = stations.filter((s) => /\bevan\b/i.test(s.network + ' ' + s.name)).length;
+    const head = stations.length ? stations.length + ' կայան' + (evan ? ', EVAN՝ ' + evan : '') : 'Կայաններ չկան';
+    $('station-count').textContent = head + ' · ցուցակ՝ ' + manualStatus + ' · OSM՝ ' + osmStatus;
     updateNearest();
   }
 
@@ -180,14 +263,69 @@
   });
   $('btn-stations').classList.add('on');
 
+  // Our own list.
   fetch('stations.json', { cache: 'no-cache' })
     .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then((data) => {
       const list = Array.isArray(data) ? data : data.stations;
-      stations = (list || []).filter((s) => isFinite(s.lat) && isFinite(s.lng));
-      renderStations();
+      manualStations = (list || [])
+        .map((s) => Object.assign({}, s, { lat: Number(s.lat), lng: Number(s.lng), source: 'list' }))
+        .filter(validStation);
+      manualStatus = String(manualStations.length);
     })
-    .catch(() => { $('station-count').textContent = 'stations.json-ը չբացվեց'; });
+    .catch(() => { manualStatus = 'չբացվեց'; })
+    .then(mergeStations);
+
+  // OpenStreetMap, with a local cache so the car does not download it on every start.
+  function readOsmCache() {
+    try {
+      const c = JSON.parse(localStorage.getItem(OSM_CACHE_KEY) || 'null');
+      return c && Array.isArray(c.stations) ? c : null;
+    } catch (e) { return null; }
+  }
+
+  function fetchWithTimeout(url, opts, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(timer));
+  }
+
+  async function fetchOsmStations() {
+    for (const url of OVERPASS_SERVERS) {
+      try {
+        const r = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(OSM_QUERY),
+        }, 45000);
+        if (!r.ok) continue;
+        const data = await r.json();
+        if (!data || !Array.isArray(data.elements)) continue;
+        return data.elements.map(fromOsm).filter(validStation);
+      } catch (e) { /* try the next server */ }
+    }
+    return null;
+  }
+
+  async function loadOsmStations() {
+    const cached = readOsmCache();
+    if (cached) {
+      osmStations = cached.stations;
+      osmStatus = String(osmStations.length);
+      mergeStations();
+      if (Date.now() - cached.at < OSM_MAX_AGE_MS) return;
+    }
+    const fresh = await fetchOsmStations();
+    if (fresh) {
+      osmStations = fresh;
+      osmStatus = String(fresh.length);
+      try { localStorage.setItem(OSM_CACHE_KEY, JSON.stringify({ at: Date.now(), stations: fresh })); } catch (e) { /* storage full or blocked */ }
+    } else if (!cached) {
+      osmStatus = 'չբեռնվեց';
+    }
+    mergeStations();
+  }
+  loadOsmStations();
 
   // ---- Clock and network ----
   function tick() {

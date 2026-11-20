@@ -148,3 +148,4 @@ body { display: flex; flex-direction: column; }
   .map-buttons { top: 10px; right: 10px; gap: 8px; }
   .map-buttons .btn { min-width: 48px; min-height: 44px; padding: 0 12px; font-size: 16px; }
 }
+.station-src { color: #8a919c; font-size: 13px; }
